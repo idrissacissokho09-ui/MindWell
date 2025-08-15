@@ -1,0 +1,435 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AlertCircle, Heart, Home, MessageCircle, PieChart, Settings, Sparkles, BookOpen, ShieldCheck } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+
+/**
+ * MindWell — MVP Web Prototype (React + Tailwind + shadcn + Recharts)
+ * --------------------------------------------------------------
+ * This single-file prototype demonstrates the core flows:
+ * - Onboarding + Consent
+ * - Home (quick mood check, shortcuts)
+ * - Chatbot (empathetic, non-clinical)
+ * - Assessments (mini PHQ-2 / GAD-2)
+ * - Resources Library (audio/text placeholders)
+ * - Progress (mood history chart)
+ * - Settings (privacy, data export/delete)
+ *
+ * Data is stored locally via localStorage (for demo only).
+ * Important: This is NOT a medical device and does not replace professional care.
+ */
+
+// -------------- Utilities --------------
+const store = {
+  get(key, fallback) {
+    try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; } catch { return fallback; }
+  },
+  set(key, val) {
+    localStorage.setItem(key, JSON.stringify(val));
+  },
+  del(key) { localStorage.removeItem(key); }
+};
+
+const todayKey = () => new Date().toISOString().slice(0,10);
+
+// -------------- App Shell --------------
+export default function MindWellApp() {
+  const [tab, setTab] = useState("home");
+  const [consented, setConsented] = useState(() => store.get("mw_consented", false));
+  const [dark, setDark] = useState(() => store.get("mw_dark", false));
+
+  useEffect(() => { document.documentElement.classList.toggle("dark", dark); store.set("mw_dark", dark); }, [dark]);
+  useEffect(() => { store.set("mw_consented", consented); }, [consented]);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white dark:from-slate-900 dark:to-slate-950 text-slate-900 dark:text-slate-100">
+      <Header onToggleDark={() => setDark(!dark)} dark={dark} />
+
+      <main className="max-w-5xl mx-auto p-4 md:p-8">
+        <AnimatePresence mode="wait">
+          {!consented && (
+            <motion.div key="consent" initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} exit={{opacity:0}}>
+              <ConsentCard onAccept={() => setConsented(true)} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <Tabs value={tab} onValueChange={setTab} className="mt-4">
+          <TabsList className="grid grid-cols-6 gap-2 bg-white/60 dark:bg-slate-800/60 p-1 rounded-2xl">
+            <TabsTrigger value="home" className="rounded-xl flex items-center gap-2"><Home className="h-4 w-4"/>Accueil</TabsTrigger>
+            <TabsTrigger value="chat" className="rounded-xl flex items-center gap-2"><MessageCircle className="h-4 w-4"/>Chat</TabsTrigger>
+            <TabsTrigger value="assess" className="rounded-xl flex items-center gap-2"><ShieldCheck className="h-4 w-4"/>Évaluation</TabsTrigger>
+            <TabsTrigger value="resources" className="rounded-xl flex items-center gap-2"><BookOpen className="h-4 w-4"/>Ressources</TabsTrigger>
+            <TabsTrigger value="progress" className="rounded-xl flex items-center gap-2"><PieChart className="h-4 w-4"/>Suivi</TabsTrigger>
+            <TabsTrigger value="settings" className="rounded-xl flex items-center gap-2"><Settings className="h-4 w-4"/>Réglages</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="home"><HomeView goChat={() => setTab("chat")} /></TabsContent>
+          <TabsContent value="chat"><ChatView /></TabsContent>
+          <TabsContent value="assess"><AssessmentsView /></TabsContent>
+          <TabsContent value="resources"><ResourcesView /></TabsContent>
+          <TabsContent value="progress"><ProgressView /></TabsContent>
+          <TabsContent value="settings"><SettingsView dark={dark} setDark={setDark} resetConsent={() => setConsented(false)} /></TabsContent>
+        </Tabs>
+      </main>
+
+      <Footer />
+    </div>
+  );
+}
+
+// -------------- Header / Footer --------------
+function Header({ onToggleDark, dark }) {
+  return (
+    <header className="sticky top-0 z-10 backdrop-blur border-b border-slate-200/60 dark:border-slate-800/60 bg-white/50 dark:bg-slate-900/40">
+      <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Heart className="h-6 w-6"/>
+          <span className="font-bold text-xl">MindWell</span>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300 ml-2">Prototype</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <CrisisPopover />
+          <Button variant="outline" onClick={onToggleDark}>{dark ? "Mode clair" : "Mode sombre"}</Button>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function Footer(){
+  return (
+    <footer className="mt-12 pb-12 text-center text-sm opacity-70">
+      <p>⚠️ MindWell n’est pas un dispositif médical. En cas d’urgence, contactez immédiatement les services d’aide locaux.</p>
+    </footer>
+  );
+}
+
+// -------------- Consent --------------
+function ConsentCard({ onAccept }){
+  return (
+    <Card className="rounded-2xl shadow-sm border-slate-200 dark:border-slate-800">
+      <CardContent className="p-6">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="h-6 w-6 shrink-0"/>
+          <div>
+            <h2 className="font-semibold text-lg mb-1">Avant de commencer</h2>
+            <p className="text-sm opacity-80">
+              Cet espace est confidentiel et protégé. MindWell fournit des conseils généraux, des exercices et un soutien empathique, mais ne remplace pas un professionnel de santé mentale. Vous pouvez supprimer vos données à tout moment.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-col sm:flex-row gap-3">
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline">Voir la politique de confidentialité</Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Confidentialité & Données</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm opacity-80">
+                Pour ce prototype, vos données sont stockées localement sur votre appareil (localStorage). Aucune transmission réseau. Dans une version production, elles seraient chiffrées en transit (TLS) et au repos (AES‑256), avec consentement explicite, droit d’export et d’effacement.
+              </p>
+            </DialogContent>
+          </Dialog>
+          <Button className="flex-1" onClick={onAccept}>J’accepte et je commence</Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CrisisPopover(){
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline"><Sparkles className="h-4 w-4 mr-2"/>Besoin d’aide immédiate ?</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Ressources d’urgence</DialogTitle>
+        </DialogHeader>
+        <ul className="list-disc ml-6 space-y-2 text-sm">
+          <li>Appelez les services d’urgence locaux (112/15/17 selon pays).</li>
+          <li>Contactez une personne de confiance.</li>
+          <li>Si vous êtes au Sénégal : Ligne d’écoute de <em>La Maisonnée</em> / ressources locales (personnaliser lors du déploiement).</li>
+        </ul>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// -------------- Views --------------
+function HomeView({ goChat }){
+  const [mood, setMood] = useState(() => store.get("mw_mood_today", null));
+  const moods = [
+    { id: 3, label: "Bien", icon: "😊" },
+    { id: 2, label: "Moyen", icon: "😐" },
+    { id: 1, label: "Mal", icon: "😔" },
+  ];
+
+  function saveMood(id){
+    setMood(id);
+    store.set("mw_mood_today", id);
+    const log = store.get("mw_mood_log", []);
+    const key = todayKey();
+    const exists = log.find(x => x.date === key);
+    if (exists) exists.value = id; else log.push({ date: key, value: id });
+    store.set("mw_mood_log", log);
+  }
+
+  return (
+    <section className="grid md:grid-cols-2 gap-6 mt-4">
+      <Card className="rounded-2xl">
+        <CardContent className="p-6">
+          <h3 className="font-semibold text-lg">Comment vous sentez-vous aujourd’hui ?</h3>
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            {moods.map(m => (
+              <button key={m.id} onClick={() => saveMood(m.id)} className={`p-4 rounded-2xl border ${mood===m.id?"bg-sky-100 border-sky-300 dark:bg-sky-900/30 dark:border-sky-700":"border-slate-200 dark:border-slate-800"}`}>
+                <div className="text-3xl">{m.icon}</div>
+                <div className="mt-2 font-medium">{m.label}</div>
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl">
+        <CardContent className="p-6">
+          <h3 className="font-semibold text-lg">Raccourcis</h3>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Button onClick={goChat}>Parler au chatbot</Button>
+            <Dialog>
+              <DialogTrigger asChild><Button variant="outline">Respiration guidée</Button></DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>Exercice : 4‑6 Respiration</DialogTitle></DialogHeader>
+                <p>Inspirez 4 secondes — Expirez 6 secondes. Répétez 10 fois. Concentrez-vous sur l’air qui entre et sort.</p>
+              </DialogContent>
+            </Dialog>
+            <Button variant="outline">Méditation 5 min</Button>
+          </div>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+function ChatView(){
+  const [messages, setMessages] = useState(() => store.get("mw_chat", [
+    { role: "assistant", text: "Bonjour, je suis là pour vous écouter. Que souhaitez‑vous partager aujourd’hui ?" }
+  ]));
+  const [input, setInput] = useState("");
+
+  useEffect(() => { store.set("mw_chat", messages); }, [messages]);
+
+  function reply(userText){
+    const empathic = generateEmpathicReply(userText);
+    setMessages(prev => [...prev, { role: "user", text: userText }, { role: "assistant", text: empathic }]);
+  }
+
+  return (
+    <div className="mt-4 grid gap-4">
+      <Card className="rounded-2xl">
+        <CardContent className="p-4 md:p-6">
+          <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.role==='user'?'justify-end':''}`}>
+                <div className={`px-4 py-2 rounded-2xl max-w-[80%] ${m.role==='user'?'bg-sky-600 text-white':'bg-slate-100 dark:bg-slate-800'}`}>{m.text}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex gap-2">
+            <Input placeholder="Écrivez ici…" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter' && input.trim()) { reply(input.trim()); setInput(""); }}}/>
+            <Button onClick={()=>{ if(input.trim()){ reply(input.trim()); setInput(""); }}}>Envoyer</Button>
+          </div>
+          <div className="mt-3 text-xs opacity-70">Réponses générées par règles simples (démo). En production : IA/NLP avec garde‑fous.</div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function generateEmpathicReply(text){
+  const lowers = text.toLowerCase();
+  const suggestions = [];
+  if (/(stress|angoisse|anxiété|anxiete)/.test(lowers)) suggestions.push("Essayons une respiration 4‑6 pendant 2 minutes. Souhaitez‑vous une guidance ?");
+  if (/(triste|déprime|deprime|dépression|depression)/.test(lowers)) suggestions.push("Je suis désolé·e que ce soit si difficile. Noter 3 petites choses positives aujourd’hui peut aider. Voulez‑vous essayer ?");
+  if (/(col[eè]re|furieux)/.test(lowers)) suggestions.push("La mise à distance peut aider : petite marche de 5 minutes, puis écrivez ce que vous ressentez.");
+  if (/(dormi|sommeil|insomnie)/.test(lowers)) suggestions.push("Routine de coucher : écran off 30 min, respiration lente, lumière douce.");
+  const base = "Merci de l’avoir partagé. Votre ressenti est important et valable. Je suis là pour vous écouter. ";
+  const end = suggestions.length? suggestions[0] : "Souhaitez‑vous me dire depuis quand cela dure et ce qui vous aiderait maintenant ?";
+  return base + end;
+}
+
+function AssessmentsView(){
+  const [phq2, setPhq2] = useState(store.get("mw_phq2", [0,0]));
+  const [gad2, setGad2] = useState(store.get("mw_gad2", [0,0]));
+  const totalPhq = phq2.reduce((a,b)=>a+b,0);
+  const totalGad = gad2.reduce((a,b)=>a+b,0);
+
+  useEffect(()=>{ store.set("mw_phq2", phq2); }, [phq2]);
+  useEffect(()=>{ store.set("mw_gad2", gad2); }, [gad2]);
+
+  const scale = [
+    {v:0,l:"Jamais"}, {v:1,l:"Plusieurs jours"}, {v:2,l:"> moitié des jours"}, {v:3,l:"Quasi tous les jours"}
+  ];
+
+  return (
+    <div className="mt-4 grid md:grid-cols-2 gap-6">
+      <Card className="rounded-2xl"><CardContent className="p-6">
+        <h3 className="font-semibold text-lg mb-2">PHQ‑2 (humeur)</h3>
+        <LikertQ q="Peu d’intérêt ou de plaisir à faire les choses" val={phq2[0]} set={v=>setPhq2([v, phq2[1]])} scale={scale} />
+        <LikertQ q="Se sentir triste, déprimé·e ou sans espoir" val={phq2[1]} set={v=>setPhq2([phq2[0], v])} scale={scale} />
+        <Summary score={totalPhq} threshold={3} name="PHQ‑2" />
+      </CardContent></Card>
+
+      <Card className="rounded-2xl"><CardContent className="p-6">
+        <h3 className="font-semibold text-lg mb-2">GAD‑2 (anxiété)</h3>
+        <LikertQ q="Se sentir nerveux·se, anxieux·se ou à vif" val={gad2[0]} set={v=>setGad2([v, gad2[1]])} scale={scale} />
+        <LikertQ q="Ne pas pouvoir s’arrêter de s’inquiéter" val={gad2[1]} set={v=>setGad2([gad2[0], v])} scale={scale} />
+        <Summary score={totalGad} threshold={3} name="GAD‑2" />
+      </CardContent></Card>
+    </div>
+  );
+}
+
+function LikertQ({ q, val, set, scale }){
+  return (
+    <div className="mb-4">
+      <div className="mb-2">{q}</div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {scale.map(s => (
+          <Button key={s.v} variant={val===s.v?"default":"outline"} onClick={()=>set(s.v)} className="rounded-xl">{s.l}</Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Summary({ score, threshold, name }){
+  const flag = score >= threshold;
+  return (
+    <div className={`mt-3 p-3 rounded-xl ${flag?"bg-amber-100 text-amber-900 dark:bg-amber-900/20":"bg-emerald-100 text-emerald-900 dark:bg-emerald-900/20"}`}>
+      Score {name} : <b>{score}</b> — {flag?"vos réponses suggèrent un inconfort notable. Envisagez d’en parler à un professionnel.":"rien d’inhabituel signalé. Continuez vos habitudes de bien‑être."}
+    </div>
+  );
+}
+
+function ResourcesView(){
+  const items = [
+    { id:1, title:"Respiration 4‑6", type:"Exercice", desc:"2 minutes pour apaiser l’activation.", length:"2 min" },
+    { id:2, title:"Méditation body‑scan", type:"Audio", desc:"Scanner le corps en douceur.", length:"7 min" },
+    { id:3, title:"Gestion des ruminations", type:"Article", desc:"Techniques pour interrompre la boucle.", length:"3 min" },
+    { id:4, title:"Routine sommeil simple", type:"Guide", desc:"3 habitudes avant le coucher.", length:"4 min" },
+  ];
+  return (
+    <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {items.map(it=> (
+        <Card key={it.id} className="rounded-2xl">
+          <CardContent className="p-5">
+            <div className="text-xs uppercase opacity-70">{it.type} • {it.length}</div>
+            <div className="font-semibold text-lg mt-1">{it.title}</div>
+            <p className="opacity-80 mt-2 text-sm">{it.desc}</p>
+            <Button className="mt-3">Ouvrir</Button>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function ProgressView(){
+  const data = useMemo(()=>{
+    const log = store.get("mw_mood_log", []);
+    return log
+      .sort((a,b)=>a.date.localeCompare(b.date))
+      .slice(-14)
+      .map(x=>({ date: x.date.slice(5), mood: x.value }));
+  }, [store.get("mw_mood_log", [])]);
+
+  return (
+    <div className="mt-4">
+      <Card className="rounded-2xl">
+        <CardContent className="p-6">
+          <h3 className="font-semibold text-lg mb-2">Évolution de l’humeur (14 derniers jours)</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={data} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis domain={[0,4]} ticks={[1,2,3]} />
+                <Tooltip />
+                <Line type="monotone" dataKey="mood" dot />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="text-xs opacity-70 mt-2">1 = mal, 2 = moyen, 3 = bien</p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function SettingsView({ dark, setDark, resetConsent }){
+  const [exported, setExported] = useState("");
+
+  function exportData(){
+    const payload = {
+      moodLog: store.get("mw_mood_log", []),
+      chat: store.get("mw_chat", []),
+      phq2: store.get("mw_phq2", [0,0]),
+      gad2: store.get("mw_gad2", [0,0])
+    };
+    const txt = JSON.stringify(payload, null, 2);
+    setExported(txt);
+  }
+
+  function wipe(){
+    store.del("mw_mood_log");
+    store.del("mw_chat");
+    store.del("mw_phq2");
+    store.del("mw_gad2");
+    store.del("mw_mood_today");
+    setExported("");
+    alert("Données locales supprimées.");
+  }
+
+  return (
+    <div className="mt-4 grid md:grid-cols-2 gap-6">
+      <Card className="rounded-2xl"><CardContent className="p-6 space-y-4">
+        <h3 className="font-semibold text-lg">Affichage</h3>
+        <div className="flex items-center justify-between">
+          <span>Mode sombre</span>
+          <Switch checked={dark} onCheckedChange={setDark} />
+        </div>
+        <h3 className="font-semibold text-lg mt-6">Confidentialité</h3>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={exportData}>Exporter mes données</Button>
+          <Button variant="destructive" onClick={wipe}>Effacer mes données</Button>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={resetConsent}>Revoir le consentement</Button>
+        </div>
+        <Textarea readOnly value={exported} placeholder="Vos données exportées apparaîtront ici…" className="min-h-[140px]"/>
+      </CardContent></Card>
+
+      <Card className="rounded-2xl"><CardContent className="p-6">
+        <h3 className="font-semibold text-lg">Contact avec un pro (démo)</h3>
+        <p className="opacity-80 text-sm">Cette section affichera prochainement des thérapeutes partenaires vérifiés, avec prise de rendez‑vous.</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Button variant="outline">Voir les partenaires</Button>
+          <Button>Demander un rendez‑vous</Button>
+        </div>
+      </CardContent></Card>
+    </div>
+  );
+}
